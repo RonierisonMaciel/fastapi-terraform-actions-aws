@@ -7,11 +7,11 @@ variable "instance_type" {
 }
 
 variable "ami" {
-  default = "ami-080e1f13689e07408"
+  default = "ami-084568db4383264d4"
 }
 
 variable "key_name" {
-  default = "AWS_SSH_PRIVATE_KEY"
+  default = "macOS"
 }
 
 variable "docker_image" {
