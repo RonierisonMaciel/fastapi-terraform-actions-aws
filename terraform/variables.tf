@@ -11,7 +11,7 @@ variable "ami" {
 }
 
 variable "key_name" {
-  default = "macOS"
+  default = "fastapi_key"
 }
 
 variable "docker_image" {
