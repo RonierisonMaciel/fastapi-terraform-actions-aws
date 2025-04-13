@@ -3,7 +3,7 @@ provider "aws" {
 }
 
 resource "aws_security_group" "web_sg" {
-  name        = "web_sg_fastapi"
+  name        = "web_seg_fastapi"
   description = "Permite acesso HTTP e SSH."
 
   ingress {
