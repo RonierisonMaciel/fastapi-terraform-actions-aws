@@ -9,7 +9,7 @@ SENHA = "1234"
 @app.get("/", response_class=HTMLResponse)
 async def pagina_login():
     return """
-    <h1>Login</h1><br />
+    <h1 style='color:red;'>Login</h1><br />
     <form method="post">
         <input name="usuario" placeholder="Usuário" />
         <input name="senha" type="password" placeholder="Senha" />
