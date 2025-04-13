@@ -29,9 +29,9 @@ resource "aws_security_group" "web_sg" {
 }
 
 resource "aws_instance" "app_server" {
-  ami                         = var.ami_id
+  ami                         = var.ami
   instance_type               = var.instance_type
-  key_name                    = var.key_pair
+  key_name                    = var.key_name
   security_group_ids          = [aws_security_group.web_sg.id]
 
   user_data = <<-EOF
