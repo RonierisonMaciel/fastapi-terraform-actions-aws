@@ -13,12 +13,17 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
 
-      - name: Verificar se arquivos do Terraform foram alterados
+      - name: Verificar se deve aplicar o Terraform
         id: check_terraform
         run: |
-          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^terraform/'; then
+          if [ ! -f terraform/terraform.tfstate ]; then
+            echo "Primeiro deploy. Será feito o apply."
+            echo "apply=true" >> $GITHUB_OUTPUT
+          elif git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^terraform/'; then
+            echo "Alterações no Terraform detectadas."
             echo "apply=true" >> $GITHUB_OUTPUT
           else
+            echo "Nenhuma alteração no Terraform."
             echo "apply=false" >> $GITHUB_OUTPUT
           fi
 
