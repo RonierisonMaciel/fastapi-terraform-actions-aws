@@ -1,0 +1,75 @@
+name: Deploy de Aplicação na AWS
+
+on:
+  push:
+    paths:
+      - 'app/**'
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Obter IP Público da EC2
+        working-directory: terraform
+        run: |
+          terraform init
+          IP=$(terraform output -raw ec2_public_ip)
+          echo "EC2_IP=$IP" >> $GITHUB_ENV
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Aguardar instância ficar pronta (60 segundos)
+        run: sleep 60
+
+      - name: Gerar hash do código
+        id: hash
+        run: |
+          CODE_HASH=$(tar -cf - ./app | sha256sum | cut -d' ' -f1)
+          echo "code_hash=$CODE_HASH" >> $GITHUB_OUTPUT
+
+      - name: Verificar se há mudanças no código e implantar
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+          script: |
+            cd /home/ubuntu/app || mkdir /home/ubuntu/app && cd /home/ubuntu/app
+            echo "${{ steps.hash.outputs.code_hash }}" > .new_hash
+            if [ ! -f .last_hash ] || [ "$(cat .new_hash)" != "$(cat .last_hash)" ]; then
+              echo "Código alterado. Atualizando aplicação..."
+              sudo docker stop login-container || true
+              sudo docker rm login-container || true
+              sudo docker rmi login-app || true
+              rm -rf /home/ubuntu/app/*
+            else
+              echo "Nenhuma alteração no código. Encerrando deploy."
+              exit 0
+            fi
+
+      - name: Copiar código via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+          source: "./app"
+          target: "/home/ubuntu/app"
+
+      - name: Executar aplicação Docker
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+          script: |
+            cd /home/ubuntu/app
+            echo "${{ steps.hash.outputs.code_hash }}" > .last_hash
+            sudo docker build -t login-app .
+            sudo docker run -d -p 80:80 --restart always --name login-container login-app

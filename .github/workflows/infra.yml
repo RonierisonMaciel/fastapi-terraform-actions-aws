@@ -1,0 +1,28 @@
+name: Infraestrutura AWS com Terraform
+
+on:
+  push:
+    paths:
+      - 'terraform/**'
+  workflow_dispatch:
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init & Apply condicional
+        working-directory: terraform
+        run: |
+          terraform init
+          terraform plan -out=tfplan
+          terraform show -json tfplan | jq -e '.resource_changes | length == 0' > /dev/null \
+            && echo "Sem mudanças na infraestrutura, pulando apply." \
+            || terraform apply -auto-approve tfplan
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
