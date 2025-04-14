@@ -1,102 +1,67 @@
-name: Deploy na AWS (Infra + App)
+name: Deploy na AWS
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - 'app/**'
-      - 'terraform/**'
-      - '.github/workflows/deploy.yml'
-  workflow_dispatch:
+    branches: [ main ]
 
 jobs:
-  provision_and_deploy:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform Init
-        working-directory: terraform
-        run: terraform init
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: Verificar se arquivos do Terraform foram alterados
+        id: check_terraform
+        run: |
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^terraform/'; then
+            echo "apply=true" >> $GITHUB_OUTPUT
+          else
+            echo "apply=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Verificar se há infra provisionada
-        id: check_infra
+      - name: Terraform Init & Apply (somente se necessário)
+        if: steps.check_terraform.outputs.apply == 'true'
         working-directory: terraform
         run: |
-          terraform state list || echo "vazio" > infra_vazia.txt
-          if [ -f infra_vazia.txt ]; then
-            echo "infra=nao_provisionada" >> $GITHUB_OUTPUT
-          else
-            echo "infra=provisionada" >> $GITHUB_OUTPUT
-          fi
+          terraform init
+          terraform apply -auto-approve
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-      - name: Terraform Apply se necessário
-        if: steps.check_infra.outputs.infra == 'nao_provisionada'
-        working-directory: terraform
-        run: terraform apply -auto-approve
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
-      - name: Obter IP da instância EC2
+      - name: Obter IP Público da instância EC2
         working-directory: terraform
         run: |
           IP=$(terraform output -raw ec2_public_ip)
           echo "EC2_IP=$IP" >> $GITHUB_ENV
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-      - name: Aguardar EC2 subir em 60 segundos
+      - name: Aguardar instância ficar pronta (60 segundos)
         run: sleep 60
 
-      - name: Gerar hash do código
-        id: hash
-        run: |
-          CODE_HASH=$(tar -cf - ./app | sha256sum | cut -d' ' -f1)
-          echo "code_hash=$CODE_HASH" >> $GITHUB_OUTPUT
-
-      - name: Verificar hash e limpar container (se necessário)
+      - name: Parar e limpar Docker (se já existir)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.EC2_IP }}
           username: ubuntu
           key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
           script: |
-            cd /home/ubuntu/app || mkdir /home/ubuntu/app && cd /home/ubuntu/app
-            echo "${{ steps.hash.outputs.code_hash }}" > .new_hash
-            if [ ! -f .last_hash ] || [ "$(cat .new_hash)" != "$(cat .last_hash)" ]; then
-              echo "Código alterado. Atualizando..."
-              sudo docker stop login-container || true
-              sudo docker rm login-container || true
-              sudo docker rmi login-app || true
-              rm -rf /home/ubuntu/app/*
-            else
-              echo "Código inalterado. Ignorando deploy."
-              exit 0
-            fi
+            sudo docker stop login-container || true
+            sudo docker rm login-container || true
+            sudo docker rmi login-app || true
 
-      - name: Copiar aplicação via SCP - Secure Copy Protocol
+      - name: Copiar código via SCP
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ env.EC2_IP }}
           username: ubuntu
           key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
           source: "./app"
-          target: "/home/ubuntu/app"
+          target: "/home/ubuntu/"
 
-      - name: Subir aplicação via Docker
+      - name: Executar aplicação Docker via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.EC2_IP }}
@@ -104,6 +69,5 @@ jobs:
           key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
           script: |
             cd /home/ubuntu/app
-            echo "${{ steps.hash.outputs.code_hash }}" > .last_hash
             sudo docker build -t login-app .
             sudo docker run -d -p 80:80 --restart always --name login-container login-app
