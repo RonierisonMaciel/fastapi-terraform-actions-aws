@@ -1,0 +1,78 @@
+name: Deploy na AWS
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Verificar se houve alteração em terraform/
+        id: check_terraform
+        run: |
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^terraform/'; then
+            echo "apply=true" >> $GITHUB_OUTPUT
+          else
+            echo "apply=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Terraform Init & Apply (somente se necessário)
+        if: steps.check_terraform.outputs.apply == 'true'
+        working-directory: terraform
+        run: |
+          terraform init -input=false
+          terraform apply -auto-approve
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Obter IP Público da instância EC2
+        working-directory: terraform
+        run: |
+          terraform init -input=false
+          IP=$(terraform output -raw ec2_public_ip 2>/dev/null || echo "")
+          if [[ -z "$IP" || "$IP" == *"Warning"* || "$IP" == *"│"* ]]; then
+            echo "❌ IP inválido. Certifique-se que terraform apply foi executado ao menos uma vez."
+            exit 1
+          fi
+          echo "EC2_IP=$IP" >> $GITHUB_ENV
+
+      - name: Aguardar instância ficar pronta (60 segundos)
+        run: sleep 60
+
+      - name: Parar e limpar Docker (se já existir)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+          script: |
+            sudo docker stop login-container || true
+            sudo docker rm login-container || true
+            sudo docker rmi login-app || true
+
+      - name: Copiar código via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+          source: "./app"
+          target: "/home/ubuntu/"
+
+      - name: Executar aplicação Docker via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+          script: |
+            cd /home/ubuntu/app
+            sudo docker build -t login-app .
+            sudo docker run -d -p 80:80 --restart always --name login-container login-app
