@@ -32,27 +32,23 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-      - name: Obter IP Público da instância EC2 (com fallback)
+      - name: Obter IP Público da instância EC2 (com verificação robusta)
         id: obter_ip
         working-directory: terraform
         run: |
           terraform init -input=false
-          
-          if terraform output -raw ec2_public_ip > ip.txt 2>/dev/null; then
-            echo "✅ IP encontrado via terraform output"
-          else
-            echo "⚠️ IP não encontrado via terraform output"
-            echo "" > ip.txt
-          fi
 
-          IP=$(cat ip.txt)
+          # Captura o IP ou define como vazio se falhar
+          IP=$(terraform output -raw ec2_public_ip 2>/dev/null || echo "")
 
-          if [ -z "$IP" ]; then
-            echo "❌ IP público não encontrado. Provavelmente a infraestrutura ainda não foi criada."
-            echo "Para resolver, faça um commit que altere algo em terraform/ para forçar a criação."
+          # Verifica se o conteúdo do IP está válido
+          if [[ "$IP" == *"Warning"* || "$IP" == *"│"* || -z "$IP" ]]; then
+            echo "❌ IP público não encontrado ou inválido no estado atual do Terraform."
+            echo "ℹ️ Dica: certifique-se de que o terraform apply foi executado com sucesso."
             exit 1
           fi
 
+          echo "✅ IP encontrado: $IP"
           echo "EC2_IP=$IP" >> $GITHUB_ENV
 
       - name: Aguardar instância ficar pronta (60 segundos)
