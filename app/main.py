@@ -51,7 +51,7 @@ async def pagina_login():
             }
         }
     </script>
-    <h1 style="text-align: center;">Login...</h1><br />
+    <h1 style="text-align: center;">Login</h1><br />
     <form name="loginForm" method="post" onsubmit="return validarFormulario();">
         <input name="usuario" placeholder="Usuário" />
         <input name="senha" type="password" placeholder="Senha" />
